@@ -61,14 +61,14 @@ class Attention(nn.Module):
         self.key = Linear(config.hidden_size, self.all_head_size)
         self.value = Linear(config.hidden_size, self.all_head_size)
 ##################
-        self.query.weight.requires_grad = False
-        self.query.bias.requires_grad = False
+        # self.query.weight.requires_grad = False
+        # self.query.bias.requires_grad = False
 
-        self.key.weight.requires_grad = False
-        self.key.bias.requires_grad = False
+        # self.key.weight.requires_grad = False
+        # self.key.bias.requires_grad = False
 
-        self.value.weight.requires_grad = False
-        self.value.bias.requires_grad = False
+        # self.value.weight.requires_grad = False
+        # self.value.bias.requires_grad = False
 ######################
         self.out = Linear(config.hidden_size, config.hidden_size)
         self.attn_dropout = Dropout(config.transformer["attention_dropout_rate"])

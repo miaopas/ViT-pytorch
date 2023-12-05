@@ -11,6 +11,8 @@ import os
 from models.modeling import  CONFIGS
 from utils.data_utils import get_loader
 from torchsummary import summary
+import shlex
+
 def setup(args):
     # Prepare model
     config = CONFIGS[args.model_type](args.hidden)
@@ -149,8 +151,7 @@ def main(cmd=''):
 
 
 if __name__ == "__main__":
-    import shlex
-    [1,2,4,6,8,16,32]
+    
     for hidden in [64]:
         cmd = shlex.split(f'--name cifar10-100_500_{hidden} --hidden {hidden}  --dataset cifar10 --model_type ViT-B_16 --pretrained_dir checkpoint/ViT-B_16.npz --fp16 --fp16_opt_level O2 --gradient_accumulation_steps 5 --train_batch_size 64  --epochs 20 --warmup_epochs 4')
 
