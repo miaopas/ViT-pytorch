@@ -236,13 +236,13 @@ class Block(nn.Module):
 
             
 
-            # self.attn.query.weight.copy_(query_weight)
-            # self.attn.key.weight.copy_(key_weight)
-            # self.attn.value.weight.copy_(value_weight)
+            self.attn.query.weight.copy_(query_weight)
+            self.attn.key.weight.copy_(key_weight)
+            self.attn.value.weight.copy_(value_weight)
             self.attn.out.weight.copy_(out_weight)
-            # self.attn.query.bias.copy_(query_bias)
-            # self.attn.key.bias.copy_(key_bias)
-            # self.attn.value.bias.copy_(value_bias)
+            self.attn.query.bias.copy_(query_bias)
+            self.attn.key.bias.copy_(key_bias)
+            self.attn.value.bias.copy_(value_bias)
             self.attn.out.bias.copy_(out_bias)
 
             mlp_weight_0 = np2th(weights[pjoin(ROOT, FC_0, "kernel")]).t()

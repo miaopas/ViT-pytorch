@@ -20,8 +20,8 @@ def setup(args):
     num_classes = 10 if args.dataset == "cifar10" else 100
 
     model = VitModel(config, args=args, num_classes=num_classes)
-    model.model.load_from(np.load("attention_data/ViT-B_16-224.npz"))
-    # model.model.load_state_dict(torch.load("output/cifar10-100_500_original_checkpoint.bin"), strict=False)
+    model.model.load_from(np.load("checkpoint/ViT-B_16-224.npz"))
+    # model.model.load_state_dict(torch.load("checkpoint/cifar10-100_500_checkpoint.bin"), strict=False)
     # summary(model, depth=8)
     # return
     # model = VitModel.load_from_checkpoint('runs/cifar10-100_500_64/version_0/checkpoints/cifar10-100_500_64-epoch=19-train_loss=1.97e-01.ckpt', strict=False)
@@ -50,7 +50,7 @@ def train(args, model):
                     devices=1,
                     max_epochs=args.epochs,
                     accumulate_grad_batches=args.gradient_accumulation_steps,
-                    precision=32,
+                    precision="bf16",
                     logger=TensorBoardLogger("runs", name=args.name),
                     callbacks=[checkpoint_callback, lr_monitor])
     else:
@@ -60,7 +60,7 @@ def train(args, model):
                     strategy=DDPStrategy(find_unused_parameters=False),
                     max_epochs=args.epochs,
                     accumulate_grad_batches=args.gradient_accumulation_steps,
-                    precision=32,
+                    precision="bf16",
                     logger=TensorBoardLogger("runs", name=args.name),
                     callbacks=[checkpoint_callback, lr_monitor])
     
@@ -136,7 +136,7 @@ def main(cmd=''):
         args = parser.parse_args()
 
     # os.environ["CUDA_VISIBLE_DEVICES"] ="1"
-    args.device = [0,1,2,3]
+    args.device = [2, 3]
   
  
 
