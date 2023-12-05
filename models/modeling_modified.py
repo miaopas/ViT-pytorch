@@ -60,50 +60,26 @@ class Attention(nn.Module):
         self.query = Linear(config.hidden_size, self.all_head_size)
         self.key = Linear(config.hidden_size, self.all_head_size)
         self.value = Linear(config.hidden_size, self.all_head_size)
-##################
-        self.query.weight.requires_grad = False
-        self.query.bias.requires_grad = False
 
-        self.key.weight.requires_grad = False
-        self.key.bias.requires_grad = False
-
-        self.value.weight.requires_grad = False
-        self.value.bias.requires_grad = False
-######################
         self.out = Linear(config.hidden_size, config.hidden_size)
         self.attn_dropout = Dropout(config.transformer["attention_dropout_rate"])
         self.proj_dropout = Dropout(config.transformer["attention_dropout_rate"])
 
         self.softmax = Softmax(dim=-1)
 
-        # self.rank = config.rank
-
-        #Manually restrict the rank of the attention
-        # c = torch.zeros(self.attention_head_size)
-        # c[:self.rank] = torch.ones(self.rank)
-        # c = torch.diag(c)
-
-        # self.register_buffer('sigma', c)
-
     def transpose_for_scores(self, x):
         new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
         x = x.view(*new_x_shape)
         return x.permute(0, 2, 1, 3)
 
-    def forward(self, hidden_states):
-        mixed_query_layer = self.query(hidden_states)
+    def forward(self, hidden_states, pos):
+        mixed_query_layer = self.query(pos)
         mixed_key_layer = self.key(hidden_states)
         mixed_value_layer = self.value(hidden_states)
 
         query_layer = self.transpose_for_scores(mixed_query_layer)
         key_layer = self.transpose_for_scores(mixed_key_layer)
         value_layer = self.transpose_for_scores(mixed_value_layer)
-
-    
-        # Convert to low rank
-        # query_layer = query_layer @ self.sigma
-
-
 
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
@@ -117,7 +93,7 @@ class Attention(nn.Module):
         context_layer = context_layer.view(*new_context_layer_shape)
         attention_output = self.out(context_layer)
         attention_output = self.proj_dropout(attention_output)
-        return attention_output, attention_scores
+        return attention_output, weights
 
 
 class Mlp(nn.Module):
@@ -173,7 +149,7 @@ class Embeddings(nn.Module):
                                        stride=patch_size)
         self.position_embeddings = nn.Parameter(torch.zeros(1, n_patches+1, config.hidden_size))
         self.cls_token = nn.Parameter(torch.zeros(1, 1, config.hidden_size))
-        # self.input_permutation = config["input_permutation"]
+
         self.dropout = Dropout(config.transformer["dropout_rate"])
 
     def forward(self, x):
@@ -183,19 +159,15 @@ class Embeddings(nn.Module):
         if self.hybrid:
             x = self.hybrid_model(x)
         x = self.patch_embeddings(x)
-         ## Add a permutation here.
-
         x = x.flatten(2)
         x = x.transpose(-1, -2)
-        # if self.input_permutation:
-        #     x = x[:,self.input_permutation,:]
         x = torch.cat((cls_tokens, x), dim=1)
-        
-       
 
         embeddings = x + self.position_embeddings
         embeddings = self.dropout(embeddings)
-        return embeddings
+
+        pos_embedding = torch.zeros_like(x) + self.position_embeddings
+        return embeddings, pos_embedding
 
 
 class Block(nn.Module):
@@ -203,23 +175,32 @@ class Block(nn.Module):
         super(Block, self).__init__()
         self.hidden_size = config.hidden_size
         self.attention_norm = LayerNorm(config.hidden_size, eps=1e-6)
+        self.pos_norm = LayerNorm(config.hidden_size, eps=1e-6)
         self.ffn_norm = LayerNorm(config.hidden_size, eps=1e-6)
         self.ffn = Mlp(config)
         self.attn = Attention(config, vis)
 
-        # print(self.hidden_size)
+        self.pos_ffn_norm = LayerNorm(config.hidden_size, eps=1e-6)
+        self.pos_ffn = Mlp(config)
 
-    def forward(self, x):
+    def forward(self, x, pos):
         h = x
         x = self.attention_norm(x)
-        x, weights = self.attn(x)
+        pos = self.pos_norm(pos)
+        x, weights = self.attn(x, pos)
         x = x + h
 
         h = x
         x = self.ffn_norm(x)
         x = self.ffn(x)
         x = x + h
-        return x, weights
+
+        hh = pos
+        pos = self.pos_ffn_norm(pos)
+        pos = self.pos_ffn(pos)
+        pos = pos + hh
+
+        return x, weights, pos
 
     def load_from(self, weights, n_block):
         ROOT = f"Transformer/encoderblock_{n_block}"
@@ -234,15 +215,13 @@ class Block(nn.Module):
             value_bias = np2th(weights[pjoin(ROOT, ATTENTION_V, "bias")]).view(-1)
             out_bias = np2th(weights[pjoin(ROOT, ATTENTION_OUT, "bias")]).view(-1)
 
-            
-
-            # self.attn.query.weight.copy_(query_weight)
-            # self.attn.key.weight.copy_(key_weight)
-            # self.attn.value.weight.copy_(value_weight)
+            self.attn.query.weight.copy_(query_weight)
+            self.attn.key.weight.copy_(key_weight)
+            self.attn.value.weight.copy_(value_weight)
             self.attn.out.weight.copy_(out_weight)
-            # self.attn.query.bias.copy_(query_bias)
-            # self.attn.key.bias.copy_(key_bias)
-            # self.attn.value.bias.copy_(value_bias)
+            self.attn.query.bias.copy_(query_bias)
+            self.attn.key.bias.copy_(key_bias)
+            self.attn.value.bias.copy_(value_bias)
             self.attn.out.bias.copy_(out_bias)
 
             mlp_weight_0 = np2th(weights[pjoin(ROOT, FC_0, "kernel")]).t()
@@ -271,13 +250,14 @@ class Encoder(nn.Module):
             layer = Block(config, vis)
             self.layer.append(copy.deepcopy(layer))
 
-    def forward(self, hidden_states):
+    def forward(self, hidden_states, pos):
         attn_weights = []
         for layer_block in self.layer:
-            hidden_states, weights = layer_block(hidden_states)
-            attn_weights.append(weights)
+            hidden_states, weights, pos = layer_block(hidden_states, pos)
+            if self.vis:
+                attn_weights.append(weights)
         encoded = self.encoder_norm(hidden_states)
-        return encoded, attn_weights
+        return encoded, attn_weights, pos
 
 
 class Transformer(nn.Module):
@@ -286,13 +266,10 @@ class Transformer(nn.Module):
         self.embeddings = Embeddings(config, img_size=img_size)
         self.encoder = Encoder(config, vis)
 
-    def forward(self, input_ids, return_embedding=False):
-        embedding_output = self.embeddings(input_ids)
-        
-        if return_embedding:
-            return embedding_output
-        encoded, attn_weights = self.encoder(embedding_output)
-        return encoded, attn_weights
+    def forward(self, input_ids):
+        embedding_output, pos = self.embeddings(input_ids)
+        encoded, attn_weights, pos = self.encoder(embedding_output, pos)
+        return encoded, attn_weights, pos
 
 
 class VisionTransformer(nn.Module):
@@ -306,7 +283,10 @@ class VisionTransformer(nn.Module):
         self.head = Linear(config.hidden_size, num_classes)
 
     def forward(self, x, labels=None):
-        x, attn_weights = self.transformer(x)
+        x, attn_weights, pos = self.transformer(x)
+
+        x = x + pos * 0.0
+
         logits = self.head(x[:, 0])
 
         if labels is not None:
@@ -373,12 +353,11 @@ class VisionTransformer(nn.Module):
 
 
 CONFIGS = {
-    # 'ViT-B_16_iff': configs.get_b16iff_config(),
-    'ViT-B_16': configs.get_b16_config,
-    # 'ViT-B_32': configs.get_b32_config(),
-    # 'ViT-L_16': configs.get_l16_config(),
-    # 'ViT-L_32': configs.get_l32_config(),
-    # 'ViT-H_14': configs.get_h14_config(),
-    # 'R50-ViT-B_16': configs.get_r50_b16_config(),
-    # 'testing': configs.get_testing(),
+    'ViT-B_16': configs.get_b16_config(),
+    'ViT-B_32': configs.get_b32_config(),
+    'ViT-L_16': configs.get_l16_config(),
+    'ViT-L_32': configs.get_l32_config(),
+    'ViT-H_14': configs.get_h14_config(),
+    'R50-ViT-B_16': configs.get_r50_b16_config(),
+    'testing': configs.get_testing(),
 }

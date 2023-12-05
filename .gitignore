@@ -5,6 +5,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+
+
+
 # C extensions
 *.so
 
@@ -144,3 +147,8 @@ cython_debug/
 !/logs/
 !/output/
 .idea
+
+
+.vscode
+data/
+checkpoint/

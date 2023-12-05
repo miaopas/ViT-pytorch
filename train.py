@@ -62,7 +62,13 @@ def setup(args):
     num_classes = 10 if args.dataset == "cifar10" else 100
 
     model = VisionTransformer(config, args.img_size, zero_head=True, num_classes=num_classes)
-    model.load_from(np.load(args.pretrained_dir))
+
+    # model.load_from(np.load("attention_data/ViT-B_16-224.npz"))
+    # model.load_from(np.load(args.pretrained_dir))
+    model.load_state_dict(torch.load('output/cifar10-100_500_checkpoint.bin'), strict=False)
+    
+
+
     model.to(args.device)
     num_params = count_parameters(model)
 
@@ -154,6 +160,9 @@ def train(args, model):
                                 lr=args.learning_rate,
                                 momentum=0.9,
                                 weight_decay=args.weight_decay)
+    # optimizer = torch.optim.Adam(model.parameters(),
+    #                             lr=args.learning_rate,
+    #                             weight_decay=args.weight_decay)
     t_total = args.num_steps
     if args.decay_type == "cosine":
         scheduler = WarmupCosineSchedule(optimizer, warmup_steps=args.warmup_steps, t_total=t_total)
@@ -209,8 +218,9 @@ def train(args, model):
                     torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
                 else:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
-                scheduler.step()
+                
                 optimizer.step()
+                scheduler.step()
                 optimizer.zero_grad()
                 global_step += 1
 
@@ -220,7 +230,7 @@ def train(args, model):
                 if args.local_rank in [-1, 0]:
                     writer.add_scalar("train/loss", scalar_value=losses.val, global_step=global_step)
                     writer.add_scalar("train/lr", scalar_value=scheduler.get_lr()[0], global_step=global_step)
-                if global_step % args.eval_every == 0 and args.local_rank in [-1, 0]:
+                if (global_step-1) % args.eval_every == 0 and args.local_rank in [-1, 0]:
                     accuracy = valid(args, model, writer, test_loader, global_step)
                     if best_acc < accuracy:
                         save_model(args, model)
@@ -239,7 +249,7 @@ def train(args, model):
     logger.info("End Training!")
 
 
-def main():
+def main(cmd=''):
     parser = argparse.ArgumentParser()
     # Required parameters
     parser.add_argument("--name", required=True,
@@ -293,7 +303,10 @@ def main():
                         help="Loss scaling to improve fp16 numeric stability. Only used when fp16 set to True.\n"
                              "0 (default value): dynamic loss scaling.\n"
                              "Positive power of 2: static loss scaling value.\n")
-    args = parser.parse_args()
+    if cmd != '':
+        args = parser.parse_args(cmd)
+    else:
+        args = parser.parse_args()
 
     # Setup CUDA, GPU & distributed training
     if args.local_rank == -1:
@@ -319,7 +332,7 @@ def main():
 
     # Model & Tokenizer Setup
     args, model = setup(args)
-
+    # return args, model
     # Training
     train(args, model)
 

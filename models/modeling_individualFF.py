@@ -60,30 +60,12 @@ class Attention(nn.Module):
         self.query = Linear(config.hidden_size, self.all_head_size)
         self.key = Linear(config.hidden_size, self.all_head_size)
         self.value = Linear(config.hidden_size, self.all_head_size)
-##################
-        self.query.weight.requires_grad = False
-        self.query.bias.requires_grad = False
 
-        self.key.weight.requires_grad = False
-        self.key.bias.requires_grad = False
-
-        self.value.weight.requires_grad = False
-        self.value.bias.requires_grad = False
-######################
         self.out = Linear(config.hidden_size, config.hidden_size)
         self.attn_dropout = Dropout(config.transformer["attention_dropout_rate"])
         self.proj_dropout = Dropout(config.transformer["attention_dropout_rate"])
 
         self.softmax = Softmax(dim=-1)
-
-        # self.rank = config.rank
-
-        #Manually restrict the rank of the attention
-        # c = torch.zeros(self.attention_head_size)
-        # c[:self.rank] = torch.ones(self.rank)
-        # c = torch.diag(c)
-
-        # self.register_buffer('sigma', c)
 
     def transpose_for_scores(self, x):
         new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
@@ -99,12 +81,6 @@ class Attention(nn.Module):
         key_layer = self.transpose_for_scores(mixed_key_layer)
         value_layer = self.transpose_for_scores(mixed_value_layer)
 
-    
-        # Convert to low rank
-        # query_layer = query_layer @ self.sigma
-
-
-
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         attention_probs = self.softmax(attention_scores)
@@ -117,7 +93,7 @@ class Attention(nn.Module):
         context_layer = context_layer.view(*new_context_layer_shape)
         attention_output = self.out(context_layer)
         attention_output = self.proj_dropout(attention_output)
-        return attention_output, attention_scores
+        return attention_output, weights
 
 
 class Mlp(nn.Module):
@@ -171,9 +147,9 @@ class Embeddings(nn.Module):
                                        out_channels=config.hidden_size,
                                        kernel_size=patch_size,
                                        stride=patch_size)
-        self.position_embeddings = nn.Parameter(torch.zeros(1, n_patches+1, config.hidden_size))
+        # self.position_embeddings = nn.Parameter(torch.zeros(1, n_patches+1, config.hidden_size))
         self.cls_token = nn.Parameter(torch.zeros(1, 1, config.hidden_size))
-        # self.input_permutation = config["input_permutation"]
+
         self.dropout = Dropout(config.transformer["dropout_rate"])
 
     def forward(self, x):
@@ -183,17 +159,12 @@ class Embeddings(nn.Module):
         if self.hybrid:
             x = self.hybrid_model(x)
         x = self.patch_embeddings(x)
-         ## Add a permutation here.
-
         x = x.flatten(2)
         x = x.transpose(-1, -2)
-        # if self.input_permutation:
-        #     x = x[:,self.input_permutation,:]
         x = torch.cat((cls_tokens, x), dim=1)
-        
-       
 
-        embeddings = x + self.position_embeddings
+        embeddings = x
+        # embeddings = x + self.position_embeddings
         embeddings = self.dropout(embeddings)
         return embeddings
 
@@ -204,10 +175,8 @@ class Block(nn.Module):
         self.hidden_size = config.hidden_size
         self.attention_norm = LayerNorm(config.hidden_size, eps=1e-6)
         self.ffn_norm = LayerNorm(config.hidden_size, eps=1e-6)
-        self.ffn = Mlp(config)
+        # self.ffn =  nn.ModuleList([Mlp(config) for _ in range(197)])
         self.attn = Attention(config, vis)
-
-        # print(self.hidden_size)
 
     def forward(self, x):
         h = x
@@ -217,7 +186,15 @@ class Block(nn.Module):
 
         h = x
         x = self.ffn_norm(x)
-        x = self.ffn(x)
+        
+        y = []
+    
+        # for i in range(197):
+        #     res = self.ffn[i](x[:,[i],:])
+        #     y.append(res)
+        
+        x = torch.cat(y, dim=1)
+
         x = x + h
         return x, weights
 
@@ -234,26 +211,24 @@ class Block(nn.Module):
             value_bias = np2th(weights[pjoin(ROOT, ATTENTION_V, "bias")]).view(-1)
             out_bias = np2th(weights[pjoin(ROOT, ATTENTION_OUT, "bias")]).view(-1)
 
-            
-
-            # self.attn.query.weight.copy_(query_weight)
-            # self.attn.key.weight.copy_(key_weight)
-            # self.attn.value.weight.copy_(value_weight)
+            self.attn.query.weight.copy_(query_weight)
+            self.attn.key.weight.copy_(key_weight)
+            self.attn.value.weight.copy_(value_weight)
             self.attn.out.weight.copy_(out_weight)
-            # self.attn.query.bias.copy_(query_bias)
-            # self.attn.key.bias.copy_(key_bias)
-            # self.attn.value.bias.copy_(value_bias)
+            self.attn.query.bias.copy_(query_bias)
+            self.attn.key.bias.copy_(key_bias)
+            self.attn.value.bias.copy_(value_bias)
             self.attn.out.bias.copy_(out_bias)
 
-            mlp_weight_0 = np2th(weights[pjoin(ROOT, FC_0, "kernel")]).t()
-            mlp_weight_1 = np2th(weights[pjoin(ROOT, FC_1, "kernel")]).t()
-            mlp_bias_0 = np2th(weights[pjoin(ROOT, FC_0, "bias")]).t()
-            mlp_bias_1 = np2th(weights[pjoin(ROOT, FC_1, "bias")]).t()
+            # mlp_weight_0 = np2th(weights[pjoin(ROOT, FC_0, "kernel")]).t()
+            # mlp_weight_1 = np2th(weights[pjoin(ROOT, FC_1, "kernel")]).t()
+            # mlp_bias_0 = np2th(weights[pjoin(ROOT, FC_0, "bias")]).t()
+            # mlp_bias_1 = np2th(weights[pjoin(ROOT, FC_1, "bias")]).t()
 
-            self.ffn.fc1.weight.copy_(mlp_weight_0)
-            self.ffn.fc2.weight.copy_(mlp_weight_1)
-            self.ffn.fc1.bias.copy_(mlp_bias_0)
-            self.ffn.fc2.bias.copy_(mlp_bias_1)
+            # self.ffn.fc1.weight.copy_(mlp_weight_0)
+            # self.ffn.fc2.weight.copy_(mlp_weight_1)
+            # self.ffn.fc1.bias.copy_(mlp_bias_0)
+            # self.ffn.fc2.bias.copy_(mlp_bias_1)
 
             self.attention_norm.weight.copy_(np2th(weights[pjoin(ROOT, ATTENTION_NORM, "scale")]))
             self.attention_norm.bias.copy_(np2th(weights[pjoin(ROOT, ATTENTION_NORM, "bias")]))
@@ -275,7 +250,8 @@ class Encoder(nn.Module):
         attn_weights = []
         for layer_block in self.layer:
             hidden_states, weights = layer_block(hidden_states)
-            attn_weights.append(weights)
+            if self.vis:
+                attn_weights.append(weights)
         encoded = self.encoder_norm(hidden_states)
         return encoded, attn_weights
 
@@ -286,11 +262,8 @@ class Transformer(nn.Module):
         self.embeddings = Embeddings(config, img_size=img_size)
         self.encoder = Encoder(config, vis)
 
-    def forward(self, input_ids, return_embedding=False):
+    def forward(self, input_ids):
         embedding_output = self.embeddings(input_ids)
-        
-        if return_embedding:
-            return embedding_output
         encoded, attn_weights = self.encoder(embedding_output)
         return encoded, attn_weights
 
@@ -332,29 +305,29 @@ class VisionTransformer(nn.Module):
             self.transformer.encoder.encoder_norm.bias.copy_(np2th(weights["Transformer/encoder_norm/bias"]))
 
             posemb = np2th(weights["Transformer/posembed_input/pos_embedding"])
-            posemb_new = self.transformer.embeddings.position_embeddings
-            if posemb.size() == posemb_new.size():
-                self.transformer.embeddings.position_embeddings.copy_(posemb)
-            else:
-                logger.info("load_pretrained: resized variant: %s to %s" % (posemb.size(), posemb_new.size()))
-                ntok_new = posemb_new.size(1)
+            # posemb_new = self.transformer.embeddings.position_embeddings
+            # if posemb.size() == posemb_new.size():
+            #     self.transformer.embeddings.position_embeddings.copy_(posemb)
+            # else:
+            #     logger.info("load_pretrained: resized variant: %s to %s" % (posemb.size(), posemb_new.size()))
+            #     ntok_new = posemb_new.size(1)
 
-                if self.classifier == "token":
-                    posemb_tok, posemb_grid = posemb[:, :1], posemb[0, 1:]
-                    ntok_new -= 1
-                else:
-                    posemb_tok, posemb_grid = posemb[:, :0], posemb[0]
+            #     if self.classifier == "token":
+            #         posemb_tok, posemb_grid = posemb[:, :1], posemb[0, 1:]
+            #         ntok_new -= 1
+            #     else:
+            #         posemb_tok, posemb_grid = posemb[:, :0], posemb[0]
 
-                gs_old = int(np.sqrt(len(posemb_grid)))
-                gs_new = int(np.sqrt(ntok_new))
-                print('load_pretrained: grid-size from %s to %s' % (gs_old, gs_new))
-                posemb_grid = posemb_grid.reshape(gs_old, gs_old, -1)
+            #     gs_old = int(np.sqrt(len(posemb_grid)))
+            #     gs_new = int(np.sqrt(ntok_new))
+            #     print('load_pretrained: grid-size from %s to %s' % (gs_old, gs_new))
+            #     posemb_grid = posemb_grid.reshape(gs_old, gs_old, -1)
 
-                zoom = (gs_new / gs_old, gs_new / gs_old, 1)
-                posemb_grid = ndimage.zoom(posemb_grid, zoom, order=1)
-                posemb_grid = posemb_grid.reshape(1, gs_new * gs_new, -1)
-                posemb = np.concatenate([posemb_tok, posemb_grid], axis=1)
-                self.transformer.embeddings.position_embeddings.copy_(np2th(posemb))
+            #     zoom = (gs_new / gs_old, gs_new / gs_old, 1)
+            #     posemb_grid = ndimage.zoom(posemb_grid, zoom, order=1)
+            #     posemb_grid = posemb_grid.reshape(1, gs_new * gs_new, -1)
+            #     posemb = np.concatenate([posemb_tok, posemb_grid], axis=1)
+            #     self.transformer.embeddings.position_embeddings.copy_(np2th(posemb))
 
             for bname, block in self.transformer.encoder.named_children():
                 for uname, unit in block.named_children():
@@ -373,12 +346,11 @@ class VisionTransformer(nn.Module):
 
 
 CONFIGS = {
-    # 'ViT-B_16_iff': configs.get_b16iff_config(),
-    'ViT-B_16': configs.get_b16_config,
-    # 'ViT-B_32': configs.get_b32_config(),
-    # 'ViT-L_16': configs.get_l16_config(),
-    # 'ViT-L_32': configs.get_l32_config(),
-    # 'ViT-H_14': configs.get_h14_config(),
-    # 'R50-ViT-B_16': configs.get_r50_b16_config(),
-    # 'testing': configs.get_testing(),
+    'ViT-B_16': configs.get_b16_config(),
+    'ViT-B_32': configs.get_b32_config(),
+    'ViT-L_16': configs.get_l16_config(),
+    'ViT-L_32': configs.get_l32_config(),
+    'ViT-H_14': configs.get_h14_config(),
+    'R50-ViT-B_16': configs.get_r50_b16_config(),
+    'testing': configs.get_testing(),
 }
