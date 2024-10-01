@@ -167,6 +167,11 @@ class Embeddings(nn.Module):
             self.hybrid_model = ResNetV2(block_units=config.resnet.num_layers,
                                          width_factor=config.resnet.width_factor)
             in_channels = self.hybrid_model.width * 16
+
+        self.convo_of_input = nn.Conv2d(in_channels=3, out_channels=3, kernel_size=(31, 31), stride=1, padding=15, dilation=1)
+        for param in self.convo_of_input.parameters():
+            param.requires_grad = False
+
         self.patch_embeddings = Conv2d(in_channels=in_channels,
                                        out_channels=config.hidden_size,
                                        kernel_size=patch_size,
@@ -182,6 +187,9 @@ class Embeddings(nn.Module):
 
         if self.hybrid:
             x = self.hybrid_model(x)
+
+        x = self.convo_of_input(x)
+
         x = self.patch_embeddings(x)
          ## Add a permutation here.
 

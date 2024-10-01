@@ -19,12 +19,11 @@ def setup(args):
     
     num_classes = 10 if args.dataset == "cifar10" else 100
 
-    model = VitModel(config, args=args, num_classes=num_classes)
+    # model = VitModel(config, args=args, num_classes=num_classes)
     # model.model.load_from(np.load("checkpoint/ViT-B_16-224.npz"))
-    # model.model.load_state_dict(torch.load("checkpoint/cifar10-100_500_checkpoint.bin"), strict=False)
-    # summary(model, depth=8)
-    # return
-    # model = VitModel.load_from_checkpoint('runs/cifar10-100_500_64/version_0/checkpoints/cifar10-100_500_64-epoch=19-train_loss=1.97e-01.ckpt', strict=False)
+
+    model = VitModel.load_from_checkpoint('checkpoint/cifar10-100_500_64-epoch=18-train_loss=1.87e-01.ckpt', strict=False)
+    
 
 
     return args, model
@@ -135,8 +134,8 @@ def main(cmd=''):
     else:
         args = parser.parse_args()
 
-    os.environ["CUDA_VISIBLE_DEVICES"] ="1,2"
-    args.device = [0]
+    os.environ["CUDA_VISIBLE_DEVICES"] ="2,3"
+    args.device = [0,1]
   
  
 
@@ -152,7 +151,7 @@ def main(cmd=''):
 
 if __name__ == "__main__":
     
-    for hidden in [64]:
-        cmd = shlex.split(f'--name cifar10-100_500_{hidden} --hidden {hidden}  --dataset cifar10 --model_type ViT-B_16 --pretrained_dir checkpoint/ViT-B_16.npz --fp16 --fp16_opt_level O2 --gradient_accumulation_steps 5 --train_batch_size 64  --epochs 20 --warmup_epochs 4')
+    
+    cmd = shlex.split(f'--name cifar10-100_500_{64}_convoluted --hidden {64}  --dataset cifar10 --model_type ViT-B_16 --pretrained_dir checkpoint/ViT-B_16.npz --fp16 --fp16_opt_level O2 --gradient_accumulation_steps 5 --train_batch_size 64  --epochs 20 --warmup_epochs 4')
 
-        main(cmd)
+    main(cmd)
